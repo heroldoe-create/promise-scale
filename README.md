@@ -1,5 +1,7 @@
 # promise-scale
 
+![promise-scale — every health check answers "is it OK?". This one also answers "could I even tell?"](.github/assets/social-preview.png)
+
 **How I measure whether my agent system actually keeps what it promises.**
 
 A dashboard that is all green because nobody is looking is worse than a red one.
