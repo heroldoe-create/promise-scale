@@ -1,0 +1,28 @@
+# The scale is weighed by its own rule, on every push.
+#
+# Two jobs on purpose:
+#   - the scale's own planted failures (can it be shown a failure?)
+#   - the worked example's planted failures (does the shape hold for a user?)
+name: planted failures
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  planted:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.9", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: the scale, weighed by its own rule
+        run: python3 test_promise_scale.py
+      - name: the example's planted failures
+        run: python3 example.py --test
+      - name: and the example runs
+        run: python3 example.py --all --brief
