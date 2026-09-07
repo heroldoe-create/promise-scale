@@ -59,10 +59,18 @@ deja de mentir sobre sí mismo y la brecha queda dicha en vez de escondida.
 la prueba de punta a punta de la vigilancia: si se calla, la primera corrida
 sale verde y ese paso truena. Comprobado forzándolo antes de subirlo.
 
+**El `[NO VERIFICADO]` de la pasada anterior, medido — y sale que NO.** La
+imagen de vista previa social **no está asignada**: el `og:image` de la página
+apunta a `opengraph.githubassets.com`, que es la tarjeta que GitHub genera solo;
+una imagen propia se sirve desde `repository-images.githubusercontent.com`.
+Discriminante comprobado contra cuatro repos (dos con imagen propia, dos sin
+ella). La API no lo expone, pero la página sí — se declaró bloqueado sin haber
+mirado ahí. Que el archivo esté en el repo no prueba que esté publicado.
+
 **Lo que NO se hizo, y por qué:** cortar el release (**IRREVERSIBLE**, con el
-comando escrito); verificar si la imagen de vista previa social está asignada en
-los ajustes del repositorio (**BLOQUEADO**: dos clics en la web, la API no lo
-expone donde se buscó, sigue `[NO VERIFICADO]`).
+comando escrito, excluido por escrito) y asignar la imagen de vista previa (dos
+clics en *Settings → General*, sin endpoint público — le toca a Heroldo, pero
+ya sabe que hace falta en vez de no saberlo).
 
 ## 2026-09-07 — Loop de revisión y cierre (mesa Claude, Heroldo dormido)
 

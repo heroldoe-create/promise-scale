@@ -466,9 +466,25 @@ gh release create v0.2.0 --title "v0.2.0 — the scale weighs itself" \
 Después de cortarlo, la primera línea de `CHANGELOG.md` deja de ser cierta y hay
 que quitar esa sección: es una declaración de una brecha que ya no existe.
 
-**Lo que sigue BLOQUEADO de la pasada anterior:** si la imagen de vista previa
-social está realmente asignada en los ajustes del repositorio. Son dos clics en
-la web y la API no lo expone. Sigue `[NO VERIFICADO]`.
+**Lo que la pasada anterior dejó `[NO VERIFICADO]`, ahora MEDIDO — y sale que
+NO:** la imagen de vista previa social **no está asignada**. `social-preview.png`
+está en el repo desde el 2026-09-02 y nunca se subió a los ajustes. La API no lo
+expone, pero la página sí, y ahí se mide:
+
+```
+$ curl -sL https://github.com/heroldoe-create/promise-scale | grep og:image
+  → https://opengraph.githubassets.com/<hash>/heroldoe-create/promise-scale
+```
+
+Ese dominio es la tarjeta que GitHub **genera solo**. Una imagen propia se sirve
+desde `repository-images.githubusercontent.com`. Comprobado el discriminante
+contra cuatro repos: `vercel/next.js` y `tailwindlabs/tailwindcss` (con imagen
+propia) devuelven el segundo dominio; `facebook/react` y `astral-sh/ruff` (sin
+ella) devuelven el primero, igual que este.
+
+**Que el archivo exista en el repo no prueba que esté publicado.** Asignarla son
+dos clics en *Settings → General → Social preview*, en el navegador, y le toca a
+Heroldo: no hay endpoint público para hacerlo.
 
 ---
 
