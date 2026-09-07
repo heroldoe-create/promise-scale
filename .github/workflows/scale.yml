@@ -24,5 +24,14 @@ jobs:
         run: python3 test_promise_scale.py
       - name: the example's planted failures
         run: python3 example.py --test
-      - name: and the example runs
-        run: python3 example.py --all --brief
+      # Run it twice. On a clean machine the first run cannot yet tell that it
+      # has ever run — nothing is on record until it finishes once — so it
+      # exits 3 and says so, and demanding exactly 3 is the end-to-end proof
+      # that the scale watches itself. The second run can see the first, and
+      # everything is kept. If the self-watch ever stops working, the first
+      # run quietly exits 0 and this step is what catches it.
+      - name: and the example runs, and it notices whether it ran
+        run: |
+          python3 example.py --all --brief && rc=0 || rc=$?   # -e must not eat it
+          test "$rc" -eq 3
+          python3 example.py --all --brief

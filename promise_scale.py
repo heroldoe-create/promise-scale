@@ -47,6 +47,15 @@ WHAT IT GIVES YOU
     say it has been broken for 3 days instead of just "broken".
   * planted failures: `--test` breaks each promise on purpose and demands the
     scale SEE it. A scale nobody has seen fail is not a scale.
+  * the scale weighs itself: Scale(expect_every="24h") adds one promise that is
+    always measured — that the scale has actually been running. Delete the cron
+    entry and it says so, UNMEASURABLE, instead of saying nothing at all.
+  * where a reading came from: @promise(..., source="the sentinel's report")
+    marks a reading this scale did not take, and `--own` drops them, so no
+    layer certifies its own earlier word with the face of a fresh measurement.
+  * carried readings: Scale(carry="last-full.json") lets the expensive run
+    leave its readings for the fast one, which shows them WITH their age and
+    drops them to UNMEASURABLE once they go stale.
   * exit codes for cron and CI: 0 kept · 1 broken · 2 warnings · 3 unmeasurable.
 
 Written by Heroldo Escobedo. MIT.
@@ -62,9 +71,9 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
-    "promise", "Scale", "planted", "check",
+    "promise", "Scale", "planted", "check", "judge_last_run",
     "CUMPLE", "AVISO", "NO_CUMPLE", "UNMEASURABLE", "UNMEASURED",
     "KEPT", "WARN", "BROKEN",
 ]
@@ -123,18 +132,28 @@ _REGISTRY: list[dict] = []
 
 
 def promise(key: str, title: str, *, mode: str = "fast", how: str = "",
-            registry: list | None = None):
+            source: str = "", registry: list | None = None):
     """Declare one promise and how it is measured.
 
-    key   short stable id (P1, backup, tls...). It is what history is keyed on,
-          so changing it starts a new history for that promise.
-    title what the system promises, in the words of whoever depends on it —
-          not the name of the probe. "photos still arrive", not "check_rsync".
-    mode  which run includes it: "fast" (always), or any label you pass to
-          run(modes=...) for the slow or expensive ones.
-    how   one sentence naming the actual command or file that decides it. This
-          is not decoration: a promise whose measurement cannot be named in one
-          sentence is usually two promises.
+    key    short stable id (P1, backup, tls...). It is what history is keyed on,
+           so changing it starts a new history for that promise.
+    title  what the system promises, in the words of whoever depends on it —
+           not the name of the probe. "photos still arrive", not "check_rsync".
+    mode   which run includes it: "fast" (always), or any label you pass to
+           run(modes=...) for the slow or expensive ones.
+    how    one sentence naming the actual command or file that decides it. This
+           is not decoration: a promise whose measurement cannot be named in one
+           sentence is usually two promises.
+    source name the OTHER layer this reading comes from, when it is not measured
+           here — "the sentinel's report", "the nightly job's json". Leave it
+           empty for anything this scale measures itself.
+
+           This is the mechanism behind "don't let one layer certify another
+           layer's reading". A borrowed reading is carried everywhere the scale
+           reports it (`--json` and the printed report both name the source),
+           and `--own` drops every borrowed reading, so the layer that produced
+           the report can run the scale without certifying itself with a
+           reading of its own, wearing the face of a fresh measurement.
 
     The decorated function returns (state, detail, remedy):
         state   one of the five above
@@ -144,7 +163,8 @@ def promise(key: str, title: str, *, mode: str = "fast", how: str = "",
     reg = _REGISTRY if registry is None else registry
 
     def wrap(fn):
-        reg.append({"key": key, "title": title, "mode": mode, "how": how, "fn": fn})
+        reg.append({"key": key, "title": title, "mode": mode, "how": how,
+                    "source": source, "fn": fn})
         return fn
     return wrap
 
@@ -164,7 +184,9 @@ class History:
     """
 
     def __init__(self, path: Path | str | None):
-        self.path = Path(path) if path else None
+        # expanduser, so a "~/..." path lands in the home directory instead of
+        # quietly creating a directory literally called "~" next to the script.
+        self.path = Path(path).expanduser() if path else None
 
     def append(self, readings: list[dict], mode: str) -> None:
         if not self.path:
@@ -229,6 +251,171 @@ def _age(hours: float | None) -> str:
     if hours < 48:
         return "%.0f h" % hours
     return "%.0f days" % (hours / 24)
+
+
+def _hours(value) -> float | None:
+    """"24h" -> 24.0. Also 30m, 90s, 7d, or a timedelta. None if unreadable.
+
+    Unreadable on purpose returns None instead of raising: a scale that dies
+    over its own configuration is a scale that says nothing at 4 a.m., and
+    saying nothing is the failure this whole file is about. The None travels
+    to a judgement that reports UNMEASURABLE and names the value it could not
+    read, so the misconfiguration is loud in the report itself.
+    """
+    if value is None:
+        return None
+    if isinstance(value, timedelta):
+        n = value.total_seconds() / 3600.0
+        return n if n > 0 else None
+    try:
+        text = str(value).strip().lower()
+        n = float(text[:-1]) * {"s": 1 / 3600.0, "m": 1 / 60.0,
+                                "h": 1.0, "d": 24.0}[text[-1]]
+    except (IndexError, KeyError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+# ── has the scale itself been running? ──────────────────────────────────────
+# The gap this file spent a version denouncing one floor down: a scale that
+# never ran and a scale with nothing to report look identical from the outside.
+# Delete the cron entry, fill the disk, move python3 — nothing here noticed.
+# The history file already carried the timestamps; nobody read them for this.
+
+# The mode of the implicit promise below. It is not a mode you can ask for: it
+# runs in every run, because a watchdog you can leave out of the fast run is a
+# watchdog that is off exactly when the fast run is all that is left.
+_ALWAYS = "always"
+
+
+def last_run_at(history: list[dict]) -> datetime | None:
+    """When did this scale last finish a run? None if nothing is on record."""
+    for run in reversed(history):
+        try:
+            return datetime.strptime(run["at"], "%Y-%m-%d %H:%M")
+        except (KeyError, TypeError, ValueError):
+            continue
+    return None
+
+
+def _late_after(every_hours: float) -> float:
+    """When a run counts as missing: the cadence plus a tenth of it (at least a
+    minute), so ordinary cron jitter does not make the scale cry wolf about
+    itself. A daily scale is late at 26.4 h — near enough the 26 h the running
+    system this came from settled on for its 04:10 cron.
+    """
+    return every_hours + max(every_hours * 0.1, 1 / 60.0)
+
+
+def judge_last_run(hours_since: float | None, every_hours: float | None,
+                   note: str = ""):
+    """Pure judgement: numbers in, verdict out — so it can be planted.
+
+    hours_since  hours since the last run on record, or None if there is none
+    every_hours  how often it is meant to run, or None if that could not be read
+    note         why the reading is missing, when something upstream knows
+
+    A late scale is UNMEASURABLE, never BROKEN, and that is the whole point:
+    you have not learned that the system is bad, you have learned that you
+    stopped looking. That is exactly the state this project already has.
+    """
+    fix = "check whatever is supposed to run this (cron, timer, CI) and the history file"
+    if every_hours is None:
+        return (UNMEASURABLE,
+                note or "cannot read how often this scale is supposed to run",
+                "pass expect_every='24h' to Scale() — s, m, h or d")
+    every = _age(every_hours)
+    if hours_since is None:
+        return (UNMEASURABLE,
+                note or ("nothing on record says this scale has ever run "
+                         "(it is set to run every %s)" % every), fix)
+    if hours_since > _late_after(every_hours):
+        return (UNMEASURABLE,
+                "last run %s ago, and it is set to run every %s"
+                % (_age(hours_since), every), fix)
+    return CUMPLE, "last run %s ago (every %s)" % (_age(hours_since), every), ""
+
+
+# ── carried readings: the expensive ones, kept with their age ───────────────
+class Carry:
+    """Readings from the expensive run, stored with the hour they were taken.
+
+    The fast run cannot afford the three-minute promise, and calling it
+    `unmeasured` every day leaves the daily report incomplete by design. So the
+    full run leaves its readings here and the fast run carries them forward —
+    but only while they are fresh, and never without saying how old they are.
+
+    A stored reading shown without its age is a stale reading wearing the face
+    of a fresh one, which is the same failure as a silent probe. Past the limit
+    it becomes UNMEASURABLE, not UNMEASURED: once you have asked for carried
+    readings, not having one is not a choice you made in this run.
+    """
+
+    def __init__(self, path: Path | str | None, max_age="26h"):
+        self.path = Path(path).expanduser() if path else None
+        self.max_hours = _hours(max_age)
+        self.max_age = max_age
+
+    def read(self) -> dict:
+        if not self.path or not self.path.is_file():
+            return {}
+        try:
+            stored = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return stored if isinstance(stored, dict) else {}
+
+    def write(self, readings: list[dict], modes) -> None:
+        """Store only what a run that INCLUDED that mode actually measured.
+
+        `modes` is what this run asked for, and it is the whole guard. Found on
+        2026-09-07 by running the example twice on a clean machine: the first
+        run stored its own "there is no stored reading yet" line — an
+        UNMEASURABLE about the absence of a reading — and the second run
+        carried it forward as though it were one. A note saying "I could not
+        measure this" is not a measurement, and the moment it is filed as one
+        the whole mechanism turns into the stale green it exists to prevent.
+
+        A carried reading is never written back either. Writing it back would
+        stamp it with today's hour, and a reading whose clock restarts every
+        fifteen minutes never grows old and never expires — a permanent green
+        built out of one measurement taken once. Same rule as history: a file
+        that cannot be written is a comfort lost, never a reason to fail a run.
+        """
+        if not self.path:
+            return
+        wanted = set(modes)
+        fresh = {r["key"]: {"at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            "mode": r.get("mode", ""), "state": r["state"],
+                            "detail": r.get("detail", ""),
+                            "remedy": r.get("remedy", "")}
+                 for r in readings
+                 if r.get("mode") in wanted and r["state"] != UNMEASURED
+                 and not r.get("carried")}
+        if not fresh:
+            return
+        try:
+            stored = self.read()
+            stored.update(fresh)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps(stored, ensure_ascii=False, indent=1),
+                                 encoding="utf-8")
+        except OSError:
+            pass
+
+    def carried(self, key: str, now: datetime | None = None):
+        """(reading, hours_old) for a stored reading, or (None, hours_old)."""
+        entry = self.read().get(key)
+        if not isinstance(entry, dict):
+            return None, None
+        try:
+            taken = datetime.strptime(entry["at"], "%Y-%m-%d %H:%M")
+        except (KeyError, TypeError, ValueError):
+            return None, None
+        old = ((now or datetime.now()) - taken).total_seconds() / 3600.0
+        if self.max_hours is None or old > self.max_hours:
+            return None, old
+        return entry, old
 
 
 # ── planted failures ────────────────────────────────────────────────────────
@@ -334,35 +521,121 @@ def run_planted(cases: list[dict] | None = None, out=None,
 class Scale:
     """Weighs the promises and reports.
 
-    name      what is being weighed, for the header
-    version   your system's version, if it has one
-    history   path to the JSONL history file (None disables "since when")
-    registry  the promises (defaults to everything declared with @promise)
+    name         what is being weighed, for the header
+    version      your system's version, if it has one
+    history      path to the JSONL history file (None disables "since when")
+    registry     the promises (defaults to everything declared with @promise)
+    expect_every how often this scale is supposed to run — "24h", "15m", a
+                 timedelta. Set it and the scale weighs one more promise, always:
+                 that it has actually been running. Left unset, nothing changes
+                 and the scale still cannot tell whether it ran.
+    self_key     the key that implicit promise is stored under (default "scale").
+                 It shares the history file with yours, so change it only if you
+                 already have a promise by that name.
+    carry        path to a json file where the expensive readings are left, so a
+                 fast run can carry them forward with their age shown
+    carry_max_age how old a carried reading may be before it stops counting as a
+                 reading at all (default "26h": a daily job plus slack)
     """
 
     def __init__(self, name: str = "this system", version: str = "",
                  history: str | Path | None = None,
                  registry: list | None = None,
-                 planted_cases: list | None = None):
+                 planted_cases: list | None = None,
+                 expect_every=None, self_key: str = "scale",
+                 carry: str | Path | None = None, carry_max_age="26h"):
         self.name = name
         self.version = version
         self.registry = _REGISTRY if registry is None else registry
         self.planted_cases = _PLANTED if planted_cases is None else planted_cases
         self.history = History(history)
+        self.expect_every = expect_every
+        self.self_key = self_key
+        self.carry = Carry(carry, carry_max_age)
+
+    # -- the promises, including the one about the scale itself -------------
+    def promises(self) -> list[dict]:
+        """Your promises, plus the implicit one when expect_every is set.
+
+        It goes through the same list as the rest on purpose: that way it shows
+        up in `--promises`, and `--test` counts it when it names the promises
+        nobody has ever seen fail. A watchdog exempt from the project's own
+        rules would be the joke this project is about.
+        """
+        if self.expect_every is None:
+            return list(self.registry)
+        return [{
+            "key": self.self_key, "mode": _ALWAYS, "source": "", "fn": None,
+            "title": "This scale has actually been running",
+            "how": "the time of the last run in the history file, against "
+                   "expect_every=%r" % (self.expect_every,)}] + list(self.registry)
+
+    def _weigh_self(self, past: list[dict], now: datetime):
+        """The reading of the implicit promise. Wiring problems are loud here."""
+        if self.history.path is None:
+            return (UNMEASURABLE,
+                    "there is no history file, so nothing anywhere records "
+                    "whether this scale ran", "give Scale(history=...) a path")
+        if any(p["key"] == self.self_key for p in self.registry):
+            return (UNMEASURABLE,
+                    "one of your promises already uses the key %r, so this one "
+                    "cannot be told apart from it in the history"
+                    % self.self_key, "pass self_key= to Scale()")
+        every = _hours(self.expect_every)
+        last = last_run_at(past)
+        since = (now - last).total_seconds() / 3600.0 if last else None
+        return judge_last_run(since, every,
+                              "" if every is not None else
+                              "expect_every=%r cannot be read as a duration"
+                              % (self.expect_every,))
 
     # -- measuring ----------------------------------------------------------
-    def weigh(self, modes=("fast",)) -> list[dict]:
-        """Measure every promise whose mode is included. Never raises."""
+    def weigh(self, modes=("fast",), own: bool = False) -> list[dict]:
+        """Measure every promise whose mode is included. Never raises.
+
+        own   drop every promise that declares a `source`: the readings this
+              scale did not take itself. For the layer that WROTE that source —
+              running the full scale there would have it certify its own earlier
+              reading with the face of a fresh measurement.
+        """
         wanted = set(modes)
         past = self.history.read()
         now = datetime.now()
         readings = []
-        for p in self.registry:
+        for p in self.promises():
             t0 = time.time()
-            if p["mode"] not in wanted:
+            carried_at, carried_hours = "", None
+            if p["fn"] is None:                       # the scale weighing itself
+                state, detail, remedy = self._weigh_self(past, now)
+            elif own and p.get("source"):
                 state, detail, remedy = (
                     UNMEASURED,
-                    "not measured in this run (mode: %s)" % p["mode"], "")
+                    "read from %s, and --own does not take another layer's "
+                    "word for it" % p["source"], "")
+            elif p["mode"] not in wanted:
+                stored, old = self.carry.carried(p["key"], now)
+                if stored:
+                    # The age is welded to the text, not offered next to it:
+                    # there is no way to print this reading without saying when
+                    # it was taken.
+                    state = stored.get("state", UNMEASURABLE)
+                    detail = "%s — carried from the %s run %s ago" % (
+                        stored.get("detail", "").strip() or "measured",
+                        stored.get("mode", "full"), _age(old))
+                    remedy = stored.get("remedy", "")
+                    carried_at, carried_hours = stored.get("at", ""), old
+                elif self.carry.path:
+                    state, detail, remedy = (
+                        UNMEASURABLE,
+                        "not measured in this run (mode: %s), and the stored "
+                        "reading is %s" % (p["mode"], "%s old (limit %s)"
+                                           % (_age(old), self.carry.max_age)
+                                           if old is not None else "missing"),
+                        "run it in full once: --all")
+                else:
+                    state, detail, remedy = (
+                        UNMEASURED,
+                        "not measured in this run (mode: %s)" % p["mode"], "")
             else:
                 try:
                     got = p["fn"]()
@@ -377,16 +650,24 @@ class Scale:
                     # fine: we learned nothing about the promise itself.
                     state, detail, remedy = (
                         UNMEASURABLE, "the probe crashed: %s" % e, "")
-                if state not in _STATES:
-                    # Same reasoning as a crash: an answer we cannot read is not
-                    # an answer. Say what came back, so the typo is findable.
-                    state, detail, remedy = (
-                        UNMEASURABLE,
-                        "the probe returned %r, which is not one of the five "
-                        "states — so the promise was not measured" % (state,), "")
+            if state not in _STATES:
+                # Same reasoning as a crash: an answer we cannot read is not
+                # an answer. Say what came back, so the typo is findable. This
+                # sits outside the branch above because a carried reading comes
+                # out of a file anyone can edit or truncate, and a rule that
+                # only holds on the path you were thinking about is not a rule.
+                state, detail, remedy = (
+                    UNMEASURABLE,
+                    "the reading came back as %r, which is not one of the five "
+                    "states — so the promise was not measured" % (state,), "")
             r = {"key": p["key"], "title": p["title"], "how": p["how"],
                  "mode": p["mode"], "state": state, "detail": detail,
-                 "remedy": remedy, "ms": int((time.time() - t0) * 1000)}
+                 "remedy": remedy, "source": p.get("source", ""),
+                 "ms": int((time.time() - t0) * 1000)}
+            if carried_hours is not None:
+                r["carried"] = True
+                r["carried_at"] = carried_at
+                r["carried_hours"] = round(carried_hours, 1)
             if state != UNMEASURED:
                 start = since_when(p["key"], state, past, now)
                 r["since"] = start.strftime("%Y-%m-%d %H:%M") if start else ""
@@ -417,12 +698,14 @@ class Scale:
                 "exit_code": code}
 
     # -- reporting ----------------------------------------------------------
-    def report(self, readings: list[dict], v: dict, modes, out=None) -> None:
+    def report(self, readings: list[dict], v: dict, modes, out=None,
+               own: bool = False) -> None:
         out = out or sys.stdout
         head = _paint(self.name, _BOLD)
         if self.version:
             head += "  " + _paint(self.version, _DIM)
-        print("\n  %s  %s\n" % (head, _paint("(%s)" % ", ".join(modes), _DIM)), file=out)
+        modes_said = ", ".join(modes) + (", own readings only" if own else "")
+        print("\n  %s  %s\n" % (head, _paint("(%s)" % modes_said, _DIM)), file=out)
         for r in readings:
             # .get, not [ ]: a reading handed in from outside can carry a state
             # the palette does not know, and the report going down with a
@@ -433,6 +716,13 @@ class Scale:
                                        r["title"]), file=out)
             if r["detail"]:
                 print("        %s" % _paint(r["detail"], _DIM), file=out)
+            # Where a reading came from travels with it. A borrowed reading that
+            # prints like a measured one is how a layer ends up certifying its
+            # own earlier word without anybody deciding to let it.
+            if r.get("source") and r["state"] != UNMEASURED:
+                print("        %s" % _paint(
+                    "read from %s — this scale did not measure it" % r["source"],
+                    _DIM), file=out)
             if r.get("hours_like_this", 0) >= 1 and r["state"] != CUMPLE:
                 print("        %s" % _paint(
                     "like this for %s (since %s)"
@@ -480,9 +770,12 @@ class Scale:
                 "`@promise` declarations and regenerate.", "",
                 "| # | Promise | How it is measured | Run |",
                 "|---|---|---|---|"]
-        for p in self.registry:
+        for p in self.promises():
+            how = p["how"] or "—"
+            if p.get("source"):
+                how += " — **read from %s**, not measured here" % p["source"]
             rows.append("| %s | **%s** | %s | %s |"
-                        % (p["key"], p["title"], p["how"] or "—", p["mode"]))
+                        % (p["key"], p["title"], how, p["mode"]))
         rows += ["", "States: kept · warning · broken · **unmeasurable** (tried "
                  "and could not — never counts as green) · unmeasured (skipped "
                  "in that run).",
@@ -502,33 +795,38 @@ class Scale:
                         help="print the promise table as markdown")
         ap.add_argument("--test", action="store_true",
                         help="run the planted failures and exit")
+        ap.add_argument("--own", action="store_true",
+                        help="only what this scale measures itself — skip every "
+                             "promise read from another layer's report")
         ap.add_argument("--no-history", action="store_true",
-                        help="do not append this run to the history file")
+                        help="do not record this run (history or carried readings)")
         a = ap.parse_args(argv)
 
         if a.test:
             return 1 if run_planted(self.planted_cases,
-                                    registry=self.registry) else 0
+                                    registry=self.promises()) else 0
         if a.promises:
             print(self.table())
             return 0
 
         modes = (tuple(sorted({p["mode"] for p in self.registry})) if a.all
                  else tuple(a.mode or ["fast"]))
-        readings = self.weigh(modes)
+        readings = self.weigh(modes, own=a.own)
         v = self.verdict(readings)
         if not a.no_history:
             self.history.append(readings, "+".join(modes))
+            self.carry.write(readings, modes)
 
         if a.json:
             print(json.dumps({"name": self.name, "version": self.version,
                               "at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                              "modes": list(modes), "promises": readings,
-                              "verdict": v}, ensure_ascii=False, indent=1))
+                              "modes": list(modes), "own": a.own,
+                              "promises": readings, "verdict": v},
+                             ensure_ascii=False, indent=1))
         elif a.brief:
             print(self.one_line(v))
         else:
-            self.report(readings, v, modes)
+            self.report(readings, v, modes, own=a.own)
         return v["exit_code"]
 
 

@@ -1,5 +1,69 @@
 # Bitácora
 
+## 2026-09-07 — Cierre del horizonte
+
+La pasada de la madrugada dejó el horizonte ESCRITO y tres cosas en backlog.
+Esta lo CIERRA: las cinco propuestas tienen destino y ninguna quedó en
+"PROPUESTO". Detalle por propuesta, con su evidencia, en `HORIZONTE.md`.
+
+**Construido (P1, P2, P3), todo aditivo y sin dependencias ni archivos nuevos:**
+
+1. **La báscula vigila que ELLA MISMA corrió.** `Scale(expect_every="24h")` pesa
+   una promesa más, siempre, antes que las tuyas. Tarde sale `unmeasurable`,
+   nunca `broken`: no aprendiste que el sistema está mal, aprendiste que dejaste
+   de mirar. Era el mismo agujero de este proyecto un piso más arriba.
+2. **`source=` y `--own`.** Una lectura que no tomaste tú se marca, y la marca
+   viaja al parte, al `--json` y a la tabla de promesas; `--own` las tira todas.
+   Con esto, "que una capa no certifique la lectura de otra" deja de ser el
+   único consejo duro del README sin mecanismo.
+3. **Lecturas caras acarreadas con su edad soldada al texto.** La corrida
+   completa deja su lectura, la rápida la acarrea diciendo de cuándo es, y
+   pasado el límite vuelve a `unmeasurable` — no a `unmeasured`.
+
+**Descartado con medición:** el sexto estado "apagada a propósito" (el archivo
+que lo alimenta en la implementación viva **nunca se creó** en cinco días con
+catorce promesas corriendo) y los contratos de entrada como API (validar un
+esquema es decenas de líneas que no miden nada, contra C10; entró como consejo
+del README y como la promesa P6 del ejemplo, que juzga el parte ajeno antes de
+creerlo).
+
+**Medido, no citado:**
+
+```
+$ python3 test_promise_scale.py            31 → 80 casos, missed=0     EXIT=0
+$ python3 example.py --test                13 → 19 casos, missed=0     EXIT=0
+                                           every promise has a planted case
+Python 3.9  SELFTEST=0  PLANTED=0  primera corrida=3  segunda=0   (docker)
+Python 3.13 SELFTEST=0  PLANTED=0  primera corrida=3  segunda=0   (docker)
+```
+
+**Que las pruebas muerden, mutando el mecanismo** (no revisando marcadores):
+apagar la promesa implícita → 8 casos cazados; apagar `--own` → 2; dejar que el
+acarreo archive cualquier cosa → 2. Sin mutación, 80 en verde.
+
+**El fallo callado que solo salió corriendo el ciclo entero.** Con los casos
+nuevos ya verdes, el ejemplo corrido dos veces sobre un `HOME` limpio enseñó que
+la primera corrida rápida archivaba su propia nota de *"todavía no hay lectura
+guardada"* y la segunda la acarreaba como si fuera una medición. Una nota que
+dice "no pude medir" no es una medición. Arreglado (solo se archiva lo que midió
+una corrida que incluía ese modo) y plantado en tres casos. Es la segunda vez
+seguida que el arnés está verde y el agujero aparece al correr el ciclo completo.
+
+**La decisión que estaba sobre la mesa, cerrada.** `__version__` → `0.2.0`, y
+`CHANGELOG.md` nuevo cuya primera sección **declara** que la etiqueta de GitHub
+va detrás (`v0.1.0`). Cortar el release es de Heroldo y no se hizo: el comando
+está escrito en `HORIZONTE.md` y en el CHANGELOG, listo para pegar. El código
+deja de mentir sobre sí mismo y la brecha queda dicha en vez de escondida.
+
+**En CI:** el ejemplo corre dos veces y se exige que la primera salga **3**. Es
+la prueba de punta a punta de la vigilancia: si se calla, la primera corrida
+sale verde y ese paso truena. Comprobado forzándolo antes de subirlo.
+
+**Lo que NO se hizo, y por qué:** cortar el release (**IRREVERSIBLE**, con el
+comando escrito); verificar si la imagen de vista previa social está asignada en
+los ajustes del repositorio (**BLOQUEADO**: dos clics en la web, la API no lo
+expone donde se buscó, sigue `[NO VERIFICADO]`).
+
 ## 2026-09-07 — Loop de revisión y cierre (mesa Claude, Heroldo dormido)
 
 **Veredicto de /revision:** 🔴 al auditar — cobertura 14 de 25 · 🟡 al cerrar — 24 de 25

@@ -117,6 +117,73 @@ not arrive.*
 **A generated promise table.** `--promises` prints your declarations as markdown,
 so the documentation and the code cannot drift apart.
 
+**The scale watches whether the scale ran.** A check that never ran and a check
+with nothing to report look identical from the outside — this project's own
+thesis, one floor up. Tell it how often it is meant to run and it weighs one
+more promise, always, before any of yours:
+
+```python
+Scale(name="home server", history=".../history.jsonl", expect_every="24h").run()
+```
+
+```
+  scale ● UNMEASURABLE  This scale has actually been running
+        nothing on record says this scale has ever run (it is set to run every 24 h)
+        to fix: check whatever is supposed to run this (cron, timer, CI) and the history file
+```
+
+Late is `unmeasurable`, never `broken`, and that is the whole point: you have
+not learned that the system is bad, you have learned that you stopped looking.
+The timestamps were already in the history file — nothing read them for this
+until now. The state of the art asks for it by name: *"track check execution
+rates to verify monitors run on schedule"* (upstat.io, *Monitoring the
+Monitors*, 2025-10-16) and *"heartbeat signals or execution receipts […] so a
+missing heartbeat triggers an alert rather than silent absence"* (SD Times,
+*Your Agents Aren't Failing. They're Not Running.*, 2026-08-03). It obeys the
+project's own rule too: `--test` names `scale` among the promises nobody has
+ever seen fail until you plant it.
+
+**Where a reading came from.** Mark the readings you did not take yourself:
+
+```python
+@promise("P6", "Nothing is being spent without somebody noticing",
+         how="the `spend` sensor inside the sentinel's own report",
+         source="the sentinel's report")
+```
+
+The source travels with the reading — into the printed report, into `--json`,
+into the generated promise table — and `--own` drops every borrowed reading:
+
+```
+scale --own      # only what this scale measures itself
+```
+
+That is what stops a layer certifying its own earlier word. The sentinel that
+*writes* that report runs the scale with `--own`, so it cannot read its own
+output back and present it as a fresh measurement.
+
+**Expensive readings, carried with their age.** A three-minute promise cannot
+run every fifteen minutes, and calling it `unmeasured` every day leaves the
+daily report incomplete by design. So the full run leaves its readings behind
+and the fast run carries them forward:
+
+```python
+Scale(..., carry="~/.local/share/scale/last-full.json", carry_max_age="26h")
+```
+
+```
+  P5    ● KEPT          The test suite still catches what it promises to catch
+        34/34 — carried from the slow run 4 h ago
+```
+
+The age is welded onto the text, not offered beside it: there is no way to
+print a carried reading without saying when it was taken, because a stored
+reading shown without its age is a stale reading wearing the face of a fresh
+one. Past `carry_max_age` it becomes `unmeasurable` — not `unmeasured`: once
+you have asked for carried readings, not having one is not a choice you made
+in this run. And a carried reading is never written back to the store, or its
+clock would restart every fifteen minutes and it would never expire.
+
 ---
 
 ## Install
@@ -128,14 +195,23 @@ during a `pip install` is a health check with a new way to fail.
 ```bash
 git clone https://github.com/heroldoe-create/promise-scale
 python3 example.py           # a full worked example, runs anywhere
+python3 example.py           # again: now it can see that it ran once
+python3 example.py --all     # and now the slow promise has a reading to carry
 python3 example.py --test    # its planted failures
 ```
+
+**The example's first run is not green, and that is the demonstration.** It
+exits 3 because it cannot yet tell that it has ever run — nothing is on record
+until it finishes once — and because no full run has left a reading for the
+slow promise to carry. Both lines say exactly which command fixes them. A scale
+that started life green would be lying about the one thing it is for.
 
 ## Use
 
 ```bash
 scale                 # the fast promises
 scale --all           # every mode, including the slow ones
+scale --own           # only what this scale measures itself, no borrowed readings
 scale --brief         # one line, for cron
 scale --json          # for a dashboard or another program
 scale --test          # planted failures; exit 1 if the scale missed one
@@ -185,7 +261,16 @@ Three more that were learned the expensive way:
   `unmeasurable`, not `broken` and not fine: you learned nothing about the promise.
 - **Don't let one layer certify another layer's reading.** If your scale reads a
   cached report that your scale wrote, it will happily certify a fresh green on
-  stale evidence.
+  stale evidence. Say so with `source=` and run `--own` on the layer that wrote
+  the report — that is the mechanism, so this stops being advice you have to
+  remember and becomes something the tool can tell you about.
+- **Don't parse another program's text.** When a promise is measured by reading
+  what some other program printed, a regular expression over its output is
+  fragile in the silent way: the other side renames a line, and the promise
+  starts answering *wrongly* without ever breaking. Ask that program for json
+  with a schema number and named fields, and when a field you declared is
+  missing return `unmeasurable` — a missing field is news, not a blank to fill
+  in with a default.
 
 ---
 
@@ -255,7 +340,12 @@ down somewhere other than the source:
 |---|---|
 | `check(state, detail, remedy)` | a helper so a probe can `return check(CUMPLE, "41 photos")` instead of building the tuple by hand |
 | `KEPT`, `WARN`, `BROKEN` | aliases for `CUMPLE`, `AVISO`, `NO_CUMPLE`. The Spanish names are the canonical stored values — renaming them would silently break stored history — and these read better in English code |
-| `--no-history` | run without appending a line to the history file. Useful in CI, and in any run you do not want counted in "since when" |
+| `--no-history` | run without recording anything: no line in the history file, no carried readings stored. Useful in CI, and in any run you do not want counted in "since when" |
+| `Scale(expect_every=...)` | how often this scale is supposed to run: `"24h"`, `"15m"`, `"7d"`, or a `timedelta`. A run counts as missing at the cadence plus a tenth of it, so ordinary cron jitter does not make the scale cry wolf about itself. Unset, there is no extra promise and nothing changes; set to something unreadable, the promise says exactly that instead of crashing the run |
+| `Scale(self_key=...)` | the key that implicit promise is stored under (default `"scale"`). If one of your own promises already uses it, the scale says so rather than quietly merging the two histories |
+| `Scale(carry=..., carry_max_age=...)` | where the expensive run leaves its readings, and how old one may get before it stops counting as a reading at all (default `"26h"` — a daily job plus slack) |
+| `@promise(source=...)` | name the other layer a reading comes from. It shows in the report, in `--json` and in `--promises`; `--own` drops those readings entirely |
+| `judge_last_run(hours_since, every_hours)` | the self-watch's judgement, exported so you can plant it: numbers in, verdict out, like any other judgement here |
 | `python3 -m promise_scale` | prints the module's own documentation. The file is the manual |
 | `Scale(history=None)` | disables "since when" entirely. A history that cannot be written never fails a run either — it is a comfort, not a dependency |
 | `NO_COLOR=1` | no escape codes. They are also off automatically whenever output is not a terminal |
@@ -270,10 +360,12 @@ promise makes the whole run exit 1 even if four others are kept. The order is
 `broken (1)` → `unmeasurable (3)` → `warning (2)` → `all kept (0)`; the numbers
 are historical, the precedence is the point.
 
-**One thing the scale does not yet watch: itself.** If the cron entry is
-deleted, nothing here notices — a scale that never ran and a scale with nothing
-to report look identical from the outside. The history file has the timestamps
-needed to answer it; nothing reads them for that purpose yet. See `HORIZONTE.md`.
+**On the scale watching itself:** it only does when you say how often it should
+run. `Scale(expect_every="24h")` is opt-in on purpose — a scale run by hand has
+no cadence to be late against, and a promise that is red for a reason nobody
+can act on is a promise people learn to ignore. Set it wherever a cron, a timer
+or a CI job is what actually runs this. See `HORIZONTE.md` for what is still
+open.
 
 ## Licence
 

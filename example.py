@@ -4,14 +4,22 @@
 Run it:
     python3 example.py                 # the fast promises
     python3 example.py --all           # including the slow one
+    python3 example.py --own           # only what this scale measures itself
     python3 example.py --test          # the planted failures
     python3 example.py --brief         # one line, for cron
     python3 example.py --promises      # the promise table, as markdown
 
+THE FIRST RUN IS NOT GREEN, ON PURPOSE. It exits 3 and says two things it
+cannot measure yet: that this scale has ever run (nothing is on record until
+it finishes once), and the slow promise (no full run has left a reading to
+carry). Run it a second time, then `--all`, and both go green. A scale that
+started life green would be lying about the one thing it is for.
+
 No reading here touches your machine — they are faked so the example runs
-anywhere. It does write one thing: its own history file, under
-~/.local/share/example-scale/, because "broken for 31 h" needs somewhere to
-count from. `--no-history` skips even that.
+anywhere. It does write two files, both under ~/.local/share/example-scale/:
+its own history, because "broken for 31 h" needs somewhere to count from, and
+the readings the full run leaves for the fast one to carry. `--no-history`
+skips both.
 
 What is real is the SHAPE: notice that every promise splits its
 *reading* (going out and getting a number) from its *judgement* (deciding what
@@ -25,7 +33,8 @@ you cannot plant is a scale nobody has ever seen fail.
 from datetime import datetime, timedelta
 
 from promise_scale import (
-    AVISO, CUMPLE, NO_CUMPLE, UNMEASURABLE, Scale, planted, promise,
+    AVISO, CUMPLE, NO_CUMPLE, UNMEASURABLE, Scale, judge_last_run, planted,
+    promise,
 )
 
 # ─────────────────────────── the judgements ─────────────────────────────────
@@ -90,6 +99,27 @@ def judge_suite(passed, total):
     return CUMPLE, "%d/%d" % (passed, total), ""
 
 
+def judge_borrowed(report_hours_old, said_state, said_detail, max_hours=1.0):
+    """A reading somebody ELSE took, judged before it is believed.
+
+    Two things go wrong before the number even matters: the other layer's
+    report is old, or it does not carry that sensor any more. Both come back
+    UNMEASURABLE — you did not learn that the promise is broken, you learned
+    that you are reading a report instead of a system.
+    """
+    if report_hours_old is None:
+        return (UNMEASURABLE, "the other layer has left no report at all",
+                "run the sentinel once by hand")
+    if report_hours_old > max_hours:
+        return (UNMEASURABLE,
+                "the report is %.1f h old (it should be under %.0f h)"
+                % (report_hours_old, max_hours), "check what writes the report")
+    if said_state is None:
+        return (UNMEASURABLE, "the report no longer carries that sensor",
+                "a sensor was renamed on the other side")
+    return said_state, said_detail, ""
+
+
 def judge_disk(free_gb, total_gb):
     if free_gb is None:
         return UNMEASURABLE, "df gave nothing", ""
@@ -109,6 +139,7 @@ def read_backup():       return 3.2, 288
 def read_logo():         return 14.74
 def read_disk():         return 314.0, 466.0
 def read_slow_suite():   return 34, 34
+def read_sentinel():     return 0.3, CUMPLE, "$4.10 today, budget $20"
 
 
 # ─────────────────────────── the promises ───────────────────────────────────
@@ -140,6 +171,19 @@ def _():
          mode="slow", how="the full suite with a browser — about 3 minutes")
 def _():
     return judge_suite(*read_slow_suite())
+
+
+# The one reading this scale does NOT take: another layer already measures it,
+# and measuring it again here every fifteen minutes would only mean two answers
+# to disagree about. `source=` says so out loud — the report, the json and the
+# promise table all name where it came from, and `--own` drops it entirely, so
+# the layer that WRITES that report can run this scale without certifying its
+# own earlier word wearing the face of a fresh measurement.
+@promise("P6", "Nothing is being spent without somebody noticing",
+         how="the `spend` sensor inside the sentinel's own report",
+         source="the sentinel's report")
+def _():
+    return judge_borrowed(*read_sentinel())
 
 
 # ─────────────────────── the planted failures ───────────────────────────────
@@ -194,6 +238,36 @@ def _():                 return judge_suite(33, 34)
 def _():                 return judge_suite(0, None)
 
 
+@planted("borrowed: the report is 3 h old -> unmeasurable, not what it says",
+         UNMEASURABLE, key="P6")
+def _():                 return judge_borrowed(3.0, CUMPLE, "$4.10 today")
+
+
+@planted("borrowed: the sensor vanished from the report -> unmeasurable",
+         UNMEASURABLE, key="P6")
+def _():                 return judge_borrowed(0.2, None, "")
+
+
+@planted("borrowed: a fresh report saying broken -> broken", NO_CUMPLE, key="P6")
+def _():                 return judge_borrowed(0.2, NO_CUMPLE, "$61 today, budget $20")
+
+
+# The scale's own promise gets planted like any other. `--test` demands it:
+# turn on expect_every and the coverage line names `scale` until these exist.
+@planted("scale: last run 3 days ago -> unmeasurable, NOT fine",
+         UNMEASURABLE, key="scale")
+def _():                 return judge_last_run(74.0, 24.0)
+
+
+@planted("scale: last run 20 min ago -> kept", CUMPLE, key="scale")
+def _():                 return judge_last_run(0.33, 24.0)
+
+
+@planted("scale: nothing on record -> unmeasurable, never 'no news'",
+         UNMEASURABLE, key="scale")
+def _():                 return judge_last_run(None, 24.0)
+
+
 # And the rule itself, planted: unmeasurable must not exit 0.
 @planted("verdict: one unmeasurable -> exit 3, never 0", 3)
 def _():
@@ -211,9 +285,16 @@ def _():
 
 if __name__ == "__main__":
     import sys
+    aqui = "~/.local/share/example-scale/"
     sys.exit(Scale(
         name="home server",
         version="v1.4.2",
-        history="~/.local/share/example-scale/history.jsonl".replace(
-            "~", str(__import__("pathlib").Path.home())),
+        history=aqui + "history.jsonl",
+        # Say how often this is supposed to run and the scale weighs one more
+        # promise, always: that it ran. Leave it out and a deleted cron entry
+        # looks exactly like a quiet night.
+        expect_every="24h",
+        # Where the full run leaves P5, so the fast run can carry it forward
+        # with its age shown instead of calling it "unmeasured" every day.
+        carry=aqui + "last-full.json",
     ).run())

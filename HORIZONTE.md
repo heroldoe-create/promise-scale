@@ -56,7 +56,7 @@ habían bloqueado antes de esta noche. Todo esto está construido y medido — v
 | C10 | **Un archivo, sin dependencias, sin `pip install`** — porque un chequeo de salud que puede romperse durante una instalación es un chequeo con una forma nueva de fallar | README, "Install" |
 | C11 | Python 3.9+, con las plantadas corriendo en CI en 3.9, 3.11 y 3.13 en cada push | workflow + notas del release |
 | C12 | Separar la lectura del juicio, para que el juicio se pueda plantar | README, "Writing a good promise" |
-| C13 | Que ninguna capa certifique la lectura de otra | README, "Writing a good promise" — **advertido, sin mecanismo todavía** |
+| C13 | Que ninguna capa certifique la lectura de otra | README, "Writing a good promise" — **con mecanismo desde el 2026-09-07**: `source=` y `--own` (ver P2) |
 | C14 | El experimento: publicado **2026-09-02**, sin promoción, para medir si a alguien le importa **sin empujarlo**. Ventana de 30 días → **vence 2026-10-02** | mensaje del commit `12aeb31` |
 
 **Sobre C14, que hasta hoy no vivía en el repo.** El criterio estaba solo en un
@@ -70,7 +70,13 @@ fracaso de ejecución: es la respuesta a la pregunta que se hizo.
 
 ---
 
-## Alcance PROPUESTO — nada de esto está confirmado
+## Alcance PROPUESTO — cerrado el 2026-09-07
+
+**Segunda pasada del 2026-09-07: ninguna propuesta queda sin destino.** P1, P2 y
+P3 están **CONSTRUIDAS** (con la prueba que falla sin ellas, abajo en cada una);
+P4 y P5 están **DESCARTADAS** con la medición que las mata. Lo que sigue abajo
+es el texto original de la propuesta, con su destino y su evidencia encima —
+para que se pueda leer qué se propuso y qué se hizo, y no solo el resultado.
 
 Minado el 2026-09-07. Buscado con el **MCP de Perplexity**
 (`perplexity_search`), porque perplexica estaba agotada ese día; y con la **API
@@ -80,7 +86,52 @@ Están en orden de qué tan cerca están de la tesis del proyecto. **Los tres
 primeros son los únicos que se recomiendan de verdad**; el resto está listado
 para que se pueda decir que no a algo concreto.
 
-### P1 — Que la báscula se pese a sí misma 🔴 el más importante
+### P1 — Que la báscula se pese a sí misma — **CONSTRUIDA 2026-09-07**
+
+**Archivo:** `promise_scale.py` — `Scale(expect_every=...)`, `judge_last_run()`,
+`last_run_at()`, `_hours()`, `Scale.promises()`. **Demostrada en** `example.py`.
+
+**La prueba que falla sin ella** (`python3 test_promise_scale.py`, 16 casos
+nuevos). Los tres que muestran el agujero, con la báscula sin `expect_every`:
+
+```
+ok  without expect_every there is no extra promise (nothing changes)   expected 1  got 1
+ok  and a scale that has never run once reads as all green — the hole  expected 0  got 0
+ok  so the run exits 3 even though every promise you wrote is kept     expected 3  got 3
+```
+
+Y el ciclo entero, corrido en una máquina limpia (`HOME` nuevo):
+
+```
+$ python3 example.py --brief   → kept 5/7 · could not measure scale P5   EXIT=3
+$ python3 example.py --brief   → kept 6/7 · could not measure P5         EXIT=3
+$ python3 example.py --all --brief → kept 7/7                            EXIT=0
+```
+
+**Que la prueba muerde, medido, no supuesto.** Se mutó el mecanismo (que
+`promises()` no inyecte nunca la promesa implícita) y el arnés cazó **8 casos**
+y salió 1. Sin la mutación, 80 casos en verde.
+
+**En CI:** el ejemplo corre dos veces y se exige que la primera salga **3**. Si
+la vigilancia se calla, la primera corrida sale verde y ese paso lo caza — se
+comprobó forzándolo: `STEP_EXIT_IF_SELFWATCH_SILENT=1`.
+
+**Decisiones que no estaban en la propuesta y hubo que tomar:**
+- Tarde es `unmeasurable`, nunca `broken` (ya venía propuesto así, y se cumplió).
+- Se llega tarde a la cadencia **más un décimo** (24 h → 26.4 h), para que el
+  vaivén normal de un cron no dispare una alarma sobre sí misma.
+- Es **opt-in**: sin `expect_every` no aparece nada y nada cambia. Una báscula
+  que se corre a mano no tiene cadencia contra la cual llegar tarde, y una
+  promesa roja por algo que nadie puede arreglar se aprende a ignorar.
+- Un `expect_every` ilegible, un historial apagado o una clave ya ocupada por
+  una promesa tuya **no revientan la corrida**: cada uno sale `unmeasurable`
+  diciendo exactamente eso. Una báscula que se muere por su propia configuración
+  es una báscula que se calla a las 4 de la mañana.
+- La promesa implícita **entra a la cobertura de `--test`**: si la enciendes y no
+  la plantas, `--test` la nombra. La vigilancia no está exenta de la regla del
+  proyecto.
+
+<details><summary>El texto original de la propuesta</summary>
 
 **La báscula no vigila que la báscula haya corrido.** Si borran la entrada de
 cron, si el disco se llena, si el `python3` del cron desaparece: nada lo nota.
@@ -112,7 +163,36 @@ Scale(..., expect_every="24h")     # y una promesa implícita, siempre presente
 Que salga `unmeasurable` y no `broken` es deliberado: no sabes si el sistema
 está mal, sabes que **dejaste de mirar**. Exactamente el estado que ya existe.
 
-### P2 — Dar mecanismo a C13 (que una capa no se certifique a sí misma) 🟡
+</details>
+
+### P2 — Dar mecanismo a C13 — **CONSTRUIDA 2026-09-07**
+
+**Archivo:** `promise_scale.py` — `@promise(source=...)`, `weigh(own=)`,
+`--own`, el campo `source` en cada lectura del `--json`, la línea del parte y la
+columna de `--promises`. **Demostrada en** `example.py` (promesa P6, prestada
+del parte de otra capa, con sus tres casos plantados).
+
+**La prueba que falla sin ella** (10 casos nuevos):
+
+```
+ok  --own drops the borrowed reading                          expected 'unmeasured'  got 'unmeasured'
+ok  and names the layer whose word it refused to take         expected True          got True
+ok  and every reading carries where it came from              expected "the sentinel's report" got …
+ok  the printed report names the source, so nobody reads it as measured here  expected True
+ok  refusing a borrowed reading is a choice, not a failure     expected 0            got 0
+```
+
+**Que la prueba muerde:** mutado `--own` para que no salte nada, el arnés cazó
+**2 casos** y salió 1.
+
+**Lo medido en vivo:** `python3 example.py --own --brief` → `kept 6/6` (la
+lectura prestada desaparece); sin `--own` → `kept 7/7`.
+
+**Decisión de diseño:** saltar una lectura prestada es `unmeasured`, no
+`unmeasurable`. Es una decisión que tomaste, no una que el sistema te quitó —
+que es exactamente la diferencia que separa esos dos estados en este proyecto.
+
+<details><summary>El texto original de la propuesta</summary>
 
 Es el único de los tres consejos duros del README que sigue siendo solo prosa,
 y ya está resuelto en la implementación viva en español: cada promesa se marca
@@ -130,7 +210,54 @@ Y en el `--json`, que cada lectura diga de dónde salió. Sin eso, el consejo de
 README se puede seguir por disciplina, que es justo lo que el proyecto no acepta
 en ningún otro punto.
 
-### P3 — Lecturas caras, guardadas con su edad 🟡
+</details>
+
+### P3 — Lecturas caras, guardadas con su edad — **CONSTRUIDA 2026-09-07**
+
+**Archivo:** `promise_scale.py` — la clase `Carry`, `Scale(carry=,
+carry_max_age=)` y la rama de acarreo dentro de `weigh()`. **Demostrada en**
+`example.py` (P5, la promesa lenta).
+
+**La prueba que falla sin ella** (11 casos nuevos). Las dos que sostienen la
+regla:
+
+```
+ok  and cannot print it without saying when it was taken        expected True  got True
+ok  a stored reading past its limit -> unmeasurable, NOT unmeasured  expected 'unmeasurable'
+```
+
+**Que la prueba muerde:** mutado el guardado para que archive cualquier cosa, el
+arnés cazó **2 casos** y salió 1.
+
+**Y el hallazgo que solo apareció corriendo el ciclo entero.** Con los casos
+nuevos ya en verde, el ejemplo corrido dos veces en una máquina limpia enseñó
+que la primera corrida rápida **archivaba su propia nota de "todavía no hay
+lectura guardada"** —un `unmeasurable` sobre la ausencia de una lectura— y la
+segunda la **acarreaba como si fuera una medición**:
+
+```
+P5  ● UNMEASURABLE  …the stored reading is missing — carried from the slow run 0 min ago
+```
+
+Arreglado: solo se archiva lo que midió una corrida que **incluía ese modo**
+(`Carry.write(readings, modes)`). Una nota que dice "no pude medir esto" no es
+una medición, y en el momento en que se archiva como tal el mecanismo entero se
+convierte en el verde viejo que existe para evitar. Quedó plantado en tres casos
+nuevos. *Es la misma lección que ya está en la bitácora: el arnés estaba verde
+porque solo le daban entradas válidas.*
+
+**Decisiones que no estaban en la propuesta:**
+- La edad va **soldada al texto**, no ofrecida al lado: `"34/34 — carried from
+  the slow run 4 h ago"` se arma dentro de la librería, así que no hay forma de
+  imprimir una lectura guardada sin decir de cuándo es.
+- Cada lectura guarda **su propia hora**, no la del archivo. Con la hora del
+  archivo, medir una promesa barata refresca la edad de la cara.
+- Una lectura acarreada **nunca se vuelve a archivar**: si se archivara, su
+  reloj arrancaría de nuevo en cada corrida y no envejecería jamás.
+- Sin `carry` configurado, un modo saltado sigue siendo `unmeasured` — no cambia
+  nada para quien no lo pide.
+
+<details><summary>El texto original de la propuesta</summary>
 
 Hoy `--all` corre las promesas lentas y `scale` a secas las declara `unmeasured`.
 El modo rápido nunca ve el resultado de las lentas, así que el parte de todos los
@@ -143,17 +270,47 @@ guardada que se muestra sin su edad es una lectura vieja disfrazada de fresca.
 Se propone que **sea imposible mostrarla sin decir de cuándo es**, y que al pasar
 del límite vuelva a `unmeasurable`, no a `unmeasured`.
 
-### P4 — Un estado más: "apagada a propósito" ⚪ solo si hace falta
+</details>
 
-La implementación viva tiene un sexto estado para las promesas que su dueño pausó
-a conciencia, ordenado **por debajo** de las cumplidas, para que algo apagado a
-propósito no compita por el peor lugar del parte.
+### P4 — Un estado más: "apagada a propósito" — **DESCARTADA 2026-09-07**
 
-En una librería de un archivo esto es peso muerto hasta que alguien tenga una
-promesa que quiera silenciar por semanas. **Se propone NO hacerlo todavía**, y
-dejarlo escrito para que la próxima persona que lo piense sepa que ya se pensó.
+**La medición que la mata.** La implementación viva tiene ese sexto estado desde
+el 2026-09-02 y lee las promesas pausadas de un archivo. Medido hoy, cinco días
+después, sobre esa instalación:
 
-### P5 — Contratos de entrada para las sondas ⚪
+```
+$ [el archivo de promesas pausadas]  →  DOES NOT EXIST
+```
+
+Nunca se creó. Catorce promesas corriendo cada quince minutos durante cinco
+días y **cero** usos del estado que se propone copiar. Un sexto estado en una
+librería de un archivo, sin un solo caso de uso en el sistema que lo inventó, es
+peso muerto y una casilla más que cada consumidor del `--json` tiene que
+aprender. Queda escrito para que la próxima persona que lo piense sepa que ya se
+pensó, y con qué se midió.
+
+**Si alguna vez aplica:** el criterio no es "alguien lo pidió", es que alguien
+tenga una promesa que necesite silenciar **por semanas** y que hoy esté
+apagándola borrando el `@promise` — que es la señal de que la falta hace daño.
+
+### P5 — Contratos de entrada para las sondas — **DESCARTADA como API 2026-09-07**
+
+**La medición que la mata:** hacerlo de verdad significa validar un esquema
+—campos declarados, número de versión, qué hacer con un campo que falta— y eso
+son decenas de líneas que no miden nada, dentro de un archivo cuyo compromiso C10
+es *un archivo, sin dependencias*. Es una **regla de cómo escribir una sonda**, no
+una capacidad de la báscula: la propia propuesta ya lo decía.
+
+**Lo que sí se hizo, que es el residuo útil:** entró como el cuarto consejo duro
+del README (*"Don't parse another program's text"*), junto a los otros tres, y
+como la promesa P6 del ejemplo — que lee el parte de otra capa y lo **juzga antes
+de creerlo**: parte viejo → `unmeasurable`, sensor que desapareció del parte →
+`unmeasurable`, y solo entonces el estado que el parte dice. Con sus tres casos
+plantados. La recomendación queda ilustrada por código que corre, en vez de ser
+un párrafo.
+
+<details><summary>El texto original de la propuesta</summary>
+
 
 Cuando una promesa se mide leyendo la salida de otro programa, parsear texto con
 expresiones regulares es frágil de una forma silenciosa: el otro programa cambia
@@ -164,6 +321,8 @@ rellena a mano.
 
 Es una buena idea y probablemente **no pertenece a este archivo**: es una
 recomendación para el README ("no parsees texto de otro programa"), no una API.
+
+</details>
 
 ### Lo que se mira y se decide NO hacer
 
@@ -219,8 +378,12 @@ báscula"* de opinión en número. También hay precedente técnico: Prometheus 
 2026-01-30). La diferencia de `@planted` es dónde se planta: en la función de
 juicio, en el lenguaje de la sonda, sin desplegar nada.
 
-**Lo que el estado del arte pide y aquí falta:** la vigilancia de que el chequeo
-haya corrido (P1). Es el hueco real, y lo nombran las dos fuentes de arriba.
+**Lo que el estado del arte pedía y aquí faltaba:** la vigilancia de que el
+chequeo haya corrido. Era el hueco real, lo nombraban las dos fuentes de arriba,
+y **quedó construido el 2026-09-07** (P1). Lo que sigue siendo distinto de lo
+que hace la industria no es tener la vigilancia: es que aquí llegar tarde sale
+`unmeasurable` y por lo tanto **no cuenta como verde**, en vez de ser un aviso
+que se puede apagar con un interruptor.
 
 **Sobre la categoría "sistemas de agentes":** la fuente más cercana a la tesis
 de este proyecto es de agosto de 2026 y llega por su cuenta a la misma
@@ -264,27 +427,61 @@ del proyecto desde antes; el sexto se aprendió esta noche.
 
 Nada de esto está aprobado; es el orden que se propone si se aprueba algo.
 
-**Horizonte 1 — cerrar la tesis sobre sí misma.** P1 (que la báscula se pese a
-sí misma) y P2 (mecanismo para C13). Son las dos capacidades que el propio
-README implica y no tiene. Ninguna añade dependencias ni archivos.
+**Horizonte 1 — cerrar la tesis sobre sí misma. ✅ CERRADO 2026-09-07.** P1 (que
+la báscula se pese a sí misma) y P2 (mecanismo para C13), construidas, sin
+dependencias y sin archivos nuevos.
 
-**Horizonte 2 — que el parte diario esté completo.** P3, lecturas caras
-guardadas con su edad, con la garantía de que no se puedan mostrar sin decir de
-cuándo son. Solo tiene sentido después de P2.
+**Horizonte 2 — que el parte diario esté completo. ✅ CERRADO 2026-09-07.** P3,
+lecturas caras guardadas con su edad, imposibles de mostrar sin decir de cuándo
+son.
 
 **Horizonte 3 — lo que decida el experimento.** Vence el **2026-10-02**. Si
 llegan preguntas, contestan ellas qué falta y este archivo se refresca con lo
 que digan. Si no llega ninguna, eso también contesta: el proyecto está terminado
-como pieza de una sola persona, y `v0.1.0` puede quedarse quieta sin que eso sea
-un abandono.
+como pieza de una sola persona, y puede quedarse quieta sin que eso sea un
+abandono. **Es el único horizonte abierto.**
 
 **Fuera de todos los horizontes:** PyPI, exportadores, notificaciones,
 reintentos. Ver arriba.
 
 ---
 
+## Lo IRREVERSIBLE, con el comando escrito y sin ejecutar
+
+Sale hacia afuera y le pertenece a Heroldo. **No se ejecutó.**
+
+**Cortar el release `v0.2.0`.** El código en disco dice `0.2.0` desde hoy; el
+release más nuevo de GitHub sigue siendo `v0.1.0`. La brecha está **declarada**
+en `CHANGELOG.md` en vez de escondida — que era la alternativa: dejar
+`__version__` en `"0.1.0"` con tres capacidades nuevas encima, o sea un proyecto
+sobre no redondear el propio estado hacia arriba, redondeando el suyo. El
+comando, listo para pegar:
+
+```bash
+cd ~/proyectos/promise-scale
+gh release create v0.2.0 --title "v0.2.0 — the scale weighs itself" \
+  --notes "The scale now watches whether the scale ran, marks readings it did not take itself, and carries expensive readings forward with their age. See CHANGELOG.md."
+```
+
+Después de cortarlo, la primera línea de `CHANGELOG.md` deja de ser cierta y hay
+que quitar esa sección: es una declaración de una brecha que ya no existe.
+
+**Lo que sigue BLOQUEADO de la pasada anterior:** si la imagen de vista previa
+social está realmente asignada en los ajustes del repositorio. Son dos clics en
+la web y la API no lo expone. Sigue `[NO VERIFICADO]`.
+
+---
+
 ## Bitácora de refrescos
 
+- **2026-09-07 (segunda pasada, cierre)** — Cerrado. Las cinco propuestas
+  quedaron con destino: **P1, P2 y P3 CONSTRUIDAS** (cada una con la prueba que
+  falla sin ella y con una mutación que demuestra que el caso muerde), **P4 y P5
+  DESCARTADAS** con su medición. Se subió `__version__` a `0.2.0` y se creó
+  `CHANGELOG.md` declarando que la etiqueta de GitHub va detrás; cortarla es lo
+  único IRREVERSIBLE y quedó con el comando escrito, sin ejecutar. Arnés: 31 →
+  80 casos. Se encontró y arregló un fallo callado propio, corriendo el ciclo
+  entero en una máquina limpia, con los casos nuevos ya en verde.
 - **2026-09-07** — Creado en modo DEFINIR, en el loop nocturno, con Heroldo
   dormido. Alcance COMPROMETIDO reconstruido del README, los docstrings, el
   workflow y los dos mensajes de commit. Todo lo minado entró como PROPUESTO.

@@ -35,8 +35,14 @@ judgement that reads the disk itself cannot be planted, only mocked.
 ```bash
 python3 test_promise_scale.py     # the scale's own planted failures
 python3 example.py --test         # the worked example's
-python3 example.py --all --brief  # and it still runs
+python3 example.py --all --brief  # exits 3 the first time — on purpose
+python3 example.py --all --brief  # and 0 the second, once it can see it ran
 ```
+
+That pair is not a quirk to work around: the example sets `expect_every`, so on
+a clean machine the first run genuinely cannot tell that it has ever run and
+says so. CI asserts exactly that, because a first run that comes back green
+would mean the self-watch has gone quiet.
 
 All three run in CI on Python 3.9, 3.11 and 3.13, on every push. They need no
 dependencies, no virtualenv and no test framework — if any of that becomes
@@ -60,7 +66,8 @@ The stored state values (`kept`, `warning`, `broken`, `unmeasurable`,
 `unmeasured`) are written into everyone's history file. Changing a value
 silently restarts "since when" for every promise that used it, and the run that
 does it looks completely normal. Same for a promise `key`: history is keyed on
-it. Treat both as data, not as labels.
+it — including `self_key`, the key the scale's own promise is stored under.
+Treat all of them as data, not as labels.
 
 ## Questions
 
