@@ -135,5 +135,82 @@ Scale(name="x", registry=reg3, planted_cases=[]).report(
 caso("no escape codes when the output is not a terminal",
      False, "\033" in salida.getvalue())
 
+# ── a state outside the five is "could not tell", never green ───────────────
+# Found on 2026-09-07 by planting it: a probe returning "KEPT" (a typo for the
+# real value "kept") was counted as measured, matched none of the failures, and
+# the run exited 0. The scale said "kept 1/2" and went green over a promise it
+# had never read. That is the exact failure this file exists to refuse, living
+# inside the file itself.
+reg4 = []
+
+
+@promise("A", "answers properly", registry=reg4)
+def _():
+    return CUMPLE
+
+
+@promise("B", "answers with a typo", registry=reg4)
+def _():
+    return "KEPT", "looks fine to a human", ""
+
+
+s4 = Scale(registry=reg4, planted_cases=[])
+lect4 = s4.weigh()
+estados4 = {r["key"]: r["state"] for r in lect4}
+caso("an unreadable state -> unmeasurable, not green", UNMEASURABLE, estados4["B"])
+caso("and it shows what came back", True, "'KEPT'" in dict(
+    (r["key"], r["detail"]) for r in lect4)["B"])
+caso("so the run exits 3, not 0", 3, s4.verdict(lect4)["exit_code"])
+caso("and the typo is not counted as kept", 1, s4.verdict(lect4)["kept"])
+# verdict is a staticmethod anyone can call with readings the scale did not make
+caso("verdict holds the rule on readings it did not produce", 3, Scale.verdict(
+    [{"key": "a", "state": "Broken"}, {"key": "b", "state": CUMPLE}])["exit_code"])
+
+# ── and the report must survive it instead of dying with a KeyError ─────────
+salida4 = io.StringIO()
+try:
+    s4.report(lect4, s4.verdict(lect4), ("fast",), out=salida4)
+    caso("the report survives a state the palette does not know", True,
+         "UNMEASURABLE" in salida4.getvalue())
+except Exception as e:
+    caso("the report survives a state the palette does not know", True,
+         "crashed: %s" % e)
+# even one handed in raw, bypassing weigh
+salida5 = io.StringIO()
+try:
+    Scale(name="raw", registry=[], planted_cases=[]).report(
+        [{"key": "Z", "title": "t", "how": "", "mode": "fast",
+          "state": "Purple", "detail": "", "remedy": ""}],
+        Scale.verdict([{"key": "Z", "state": "Purple"}]), ("fast",), out=salida5)
+    caso("and a raw unknown state does not crash the report", True,
+         "PURPLE" in salida5.getvalue())
+except Exception as e:
+    caso("and a raw unknown state does not crash the report", True,
+         "crashed: %s" % e)
+
+# ── planted-case coverage: the project's own rule, applied to itself ────────
+cubre = [{"name": "covers A", "expect": CUMPLE, "key": "A",
+          "fn": lambda: (CUMPLE, "", "")}]
+salida6 = io.StringIO()
+perdidos6 = run_planted(cubre, out=salida6, registry=reg4)
+caso("coverage names the promise with no planted case", True,
+     "no planted case: B" in salida6.getvalue())
+caso("and reporting a gap is NOT a miss (exit code untouched)", 0, perdidos6)
+
+sin_clave = [{"name": "no key", "expect": CUMPLE, "fn": lambda: (CUMPLE, "", "")}]
+salida7 = io.StringIO()
+run_planted(sin_clave, out=salida7, registry=reg4)
+caso("a suite that never opts in sees no coverage line", False,
+     "planted case" in salida7.getvalue())
+
+todo_cubierto = [{"name": "A", "expect": CUMPLE, "key": "A",
+                  "fn": lambda: (CUMPLE, "", "")},
+                 {"name": "B", "expect": CUMPLE, "key": "B",
+                  "fn": lambda: (CUMPLE, "", "")}]
+salida8 = io.StringIO()
+run_planted(todo_cubierto, out=salida8, registry=reg4)
+caso("and says so when every promise is covered", True,
+     "every promise has a planted case" in salida8.getvalue())
+
 print("\n  [scale-self-test] missed=%d\n" % fallas)
 sys.exit(1 if fallas else 0)

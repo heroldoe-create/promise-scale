@@ -8,8 +8,12 @@ Run it:
     python3 example.py --brief         # one line, for cron
     python3 example.py --promises      # the promise table, as markdown
 
-Nothing here touches your machine — the readings are faked so the example runs
-anywhere. What is real is the SHAPE: notice that every promise splits its
+No reading here touches your machine — they are faked so the example runs
+anywhere. It does write one thing: its own history file, under
+~/.local/share/example-scale/, because "broken for 31 h" needs somewhere to
+count from. `--no-history` skips even that.
+
+What is real is the SHAPE: notice that every promise splits its
 *reading* (going out and getting a number) from its *judgement* (deciding what
 the number means). That split is what makes planted failures possible: you can
 feed the judgement a number you invented, and demand the scale sees it.
@@ -72,6 +76,20 @@ def judge_logo_contrast(ratio):
     return CUMPLE, "%.2f:1" % ratio, ""
 
 
+def judge_suite(passed, total):
+    """Split out for the same reason as the others: so it can be planted.
+
+    It was written inline in the promise below, and that alone was enough to
+    leave P5 the one promise in this file nobody had ever seen fail — the exact
+    thing the README asks you not to do, sitting in the file that teaches it.
+    """
+    if total is None:
+        return UNMEASURABLE, "the suite did not report a total", "run it by hand"
+    if passed < total:
+        return NO_CUMPLE, "%d of %d checks pass" % (passed, total), "run the suite"
+    return CUMPLE, "%d/%d" % (passed, total), ""
+
+
 def judge_disk(free_gb, total_gb):
     if free_gb is None:
         return UNMEASURABLE, "df gave nothing", ""
@@ -121,50 +139,59 @@ def _():
 @promise("P5", "The test suite still catches what it promises to catch",
          mode="slow", how="the full suite with a browser — about 3 minutes")
 def _():
-    passed, total = read_slow_suite()
-    if passed < total:
-        return NO_CUMPLE, "%d of %d checks pass" % (passed, total), "run the suite"
-    return CUMPLE, "%d/%d" % (passed, total), ""
+    return judge_suite(*read_slow_suite())
 
 
 # ─────────────────────── the planted failures ───────────────────────────────
 # Break each promise on purpose and demand the scale SEES it. A new promise
 # arrives with its planted case, or it does not arrive.
+#
+# `key=` names the promise each case belongs to, so `--test` can close the loop
+# and tell you which promises nobody has ever seen fail. Run it: the last line
+# says "every promise has a planted case". Delete one of these and it says which.
 
-@planted("photos: 0 in 24 h -> broken", NO_CUMPLE)
+@planted("photos: 0 in 24 h -> broken", NO_CUMPLE, key="P1")
 def _():                 return judge_photos(0)
 
 
-@planted("photos: log unreadable -> unmeasurable, NOT fine", UNMEASURABLE)
+@planted("photos: log unreadable -> unmeasurable, NOT fine", UNMEASURABLE, key="P1")
 def _():                 return judge_photos(None)
 
 
-@planted("photos: 41 arrived -> kept", CUMPLE)
+@planted("photos: 41 arrived -> kept", CUMPLE, key="P1")
 def _():                 return judge_photos(41)
 
 
-@planted("backup: 30 h old -> broken", NO_CUMPLE)
+@planted("backup: 30 h old -> broken", NO_CUMPLE, key="P2")
 def _():                 return judge_backup(30, 100)
 
 
-@planted("backup: ran but wrote 0 MB -> broken (looks like success)", NO_CUMPLE)
+@planted("backup: ran but wrote 0 MB -> broken (looks like success)", NO_CUMPLE, key="P2")
 def _():                 return judge_backup(1, 0)
 
 
-@planted("backup: 12 h old -> warning", AVISO)
+@planted("backup: 12 h old -> warning", AVISO, key="P2")
 def _():                 return judge_backup(12, 100)
 
 
-@planted("logo: 1.04:1, dark on dark -> broken", NO_CUMPLE)
+@planted("logo: 1.04:1, dark on dark -> broken", NO_CUMPLE, key="P3")
 def _():                 return judge_logo_contrast(1.04)
 
 
-@planted("logo: 14.7:1 -> kept", CUMPLE)
+@planted("logo: 14.7:1 -> kept", CUMPLE, key="P3")
 def _():                 return judge_logo_contrast(14.74)
 
 
-@planted("disk: 3% free -> broken", NO_CUMPLE)
+@planted("disk: 3% free -> broken", NO_CUMPLE, key="P4")
 def _():                 return judge_disk(14.0, 466.0)
+
+
+@planted("suite: 33 of 34 pass -> broken", NO_CUMPLE, key="P5")
+def _():                 return judge_suite(33, 34)
+
+
+@planted("suite: no total reported -> unmeasurable, not 'all pass'", UNMEASURABLE, key="P5")
+def _():                 return judge_suite(0, None)
 
 
 # And the rule itself, planted: unmeasurable must not exit 0.

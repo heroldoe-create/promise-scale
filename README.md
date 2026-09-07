@@ -208,6 +208,73 @@ repairing, and the invisible logo above.
 The orchestration part of that system is not novel — good open-source projects
 already do it. **This part I could not find anywhere**, so here it is.
 
+---
+
+## Who else has this state, and what they do with it
+
+The claim above is not that nobody thought of `unmeasurable`. Everybody did.
+The claim is about what happens to it next, and that part is checkable:
+
+- **Azure Monitor health models** ship the state under the name **Unknown** —
+  *"the health state of the entity can't be determined due to insufficient data
+  or a lack of signals."* In the same table, **Unhealthy** carries the note
+  *"Counts as downtime for health objective."* **Unknown carries no such note.**
+  ([Microsoft Learn, updated 2026-07-21](https://learn.microsoft.com/en-us/azure/azure-monitor/health-models/concepts))
+- **Azure Resource Health** is explicit that Unknown *"isn't a definitive
+  indication of the state of the resource"*
+  ([Microsoft Learn, 2025-11-10](https://learn.microsoft.com/en-us/azure/service-health/resource-health-overview)),
+  and at least one monitoring vendor makes alerting on it **opt-out**: a
+  *"Alert when the Resource health is unknown → No"* switch
+  ([Site24x7 KB](https://support.site24x7.com/portal/en/kb/articles/azure-resource-health-unknown)).
+
+So the state is common and the *ranking* is not. The industry default is that
+not-knowing does not count against you. This scale inverts that: `unmeasurable`
+gets its own exit code and sorts **above** warnings, because the cost of a
+silent probe is not that it is small — it is that nobody investigates a shrug.
+
+The other half — planting failures — has an industry name too, and a number
+worth knowing: the practice is called a **chaos drill on your alerts**, and
+*"about a third of alerts fail their first drill"*
+([dotcom-monitor, 2026-07-15](https://www.dotcom-monitor.com/blog/website-monitoring-best-practices/)).
+One in three. That is the measured version of *a scale nobody has seen fail is
+not a scale*. Prometheus users have `promtool`'s YAML unit tests for alert
+rules; `@planted` is the same idea one layer in — you plant at the judgement
+function, in the language the probe is written in, and `--test` tells you which
+promises have no planted case at all.
+
+*(Sources found 2026-09-07 with the Perplexity search MCP.)*
+
+---
+
+## The rest of the surface
+
+Everything above is the interesting part. This is the rest, so it is written
+down somewhere other than the source:
+
+| | |
+|---|---|
+| `check(state, detail, remedy)` | a helper so a probe can `return check(CUMPLE, "41 photos")` instead of building the tuple by hand |
+| `KEPT`, `WARN`, `BROKEN` | aliases for `CUMPLE`, `AVISO`, `NO_CUMPLE`. The Spanish names are the canonical stored values — renaming them would silently break stored history — and these read better in English code |
+| `--no-history` | run without appending a line to the history file. Useful in CI, and in any run you do not want counted in "since when" |
+| `python3 -m promise_scale` | prints the module's own documentation. The file is the manual |
+| `Scale(history=None)` | disables "since when" entirely. A history that cannot be written never fails a run either — it is a comfort, not a dependency |
+| `NO_COLOR=1` | no escape codes. They are also off automatically whenever output is not a terminal |
+
+**On `scale` in the commands above:** there is no binary called `scale` — it
+stands for *your* file, whatever you named it. There is no `pip install` and no
+entry point on purpose (see Install). Read `scale --all` as
+`python3 /srv/my-scale.py --all`.
+
+**On the exit codes:** they belong to the *run*, not to a state. One broken
+promise makes the whole run exit 1 even if four others are kept. The order is
+`broken (1)` → `unmeasurable (3)` → `warning (2)` → `all kept (0)`; the numbers
+are historical, the precedence is the point.
+
+**One thing the scale does not yet watch: itself.** If the cron entry is
+deleted, nothing here notices — a scale that never ran and a scale with nothing
+to report look identical from the outside. The history file has the timestamps
+needed to answer it; nothing reads them for that purpose yet. See `HORIZONTE.md`.
+
 ## Licence
 
 MIT © Heroldo Escobedo

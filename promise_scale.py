@@ -81,6 +81,15 @@ UNMEASURED = "unmeasured"       # we chose not to, in this mode — not a failur
 
 KEPT, WARN, BROKEN = CUMPLE, AVISO, NO_CUMPLE
 
+# The five, and nothing else. A probe that returns anything outside this set —
+# a typo like "KEPT", a bare True, an object— has answered something the scale
+# cannot read, which is the same thing as not having answered. It is folded into
+# UNMEASURABLE rather than passed through, because passed through it counted as
+# "measured, and not one of the failures" and the run exited 0. That is the exact
+# shape this whole file exists to refuse: a probe that could not tell, wearing
+# the colour of a probe that said fine.
+_STATES = (CUMPLE, AVISO, NO_CUMPLE, UNMEASURABLE, UNMEASURED)
+
 _COLOR = {
     CUMPLE: "\033[38;5;77m",
     AVISO: "\033[38;5;220m",
@@ -226,7 +235,7 @@ def _age(hours: float | None) -> str:
 _PLANTED: list[dict] = []
 
 
-def planted(name: str, expect, registry: list | None = None):
+def planted(name: str, expect, *, key: str = "", registry: list | None = None):
     """Break a promise on purpose and demand the scale sees it.
 
     A scale that has never been seen failing is not a scale — it is a green
@@ -236,9 +245,18 @@ def planted(name: str, expect, registry: list | None = None):
     (usually a (state, detail, remedy) tuple, or the state alone); `expect` is
     the state it MUST report.
 
-        @planted("backup 30h old -> broken", NO_CUMPLE)
+        @planted("backup 30h old -> broken", NO_CUMPLE, key="P2")
         def _():
             return judge_backup(hours_old=30)
+
+    key   optional: the promise this case belongs to. Give it, and `--test`
+          also names the promises that have NO planted case — which is the rule
+          this project asks of you ("a new promise arrives with its planted case,
+          or it does not arrive") finally applied to itself instead of only
+          written down. It is a report, never a failure: it does not change the
+          missed count or the exit code, so adding keys cannot redden anyone's
+          CI. The coverage line only appears once at least one case declares a
+          key, so a suite that never opts in sees no change at all.
 
     Keep the judgement separate from the reading — a function that both reads
     the disk and decides cannot be planted, only mocked.
@@ -246,13 +264,39 @@ def planted(name: str, expect, registry: list | None = None):
     reg = _PLANTED if registry is None else registry
 
     def wrap(fn):
-        reg.append({"name": name, "expect": expect, "fn": fn})
+        reg.append({"name": name, "expect": expect, "key": key, "fn": fn})
         return fn
     return wrap
 
 
-def run_planted(cases: list[dict] | None = None, out=None) -> int:
-    """Run the planted failures. Returns the number that the scale did NOT see."""
+def _coverage(cases: list[dict], registry: list | None, out) -> list[str]:
+    """Which promises have no planted case? Reported, never enforced.
+
+    Silent until at least one case declares a `key`: a suite that has not opted
+    in gets no new line, and one that has gets the list it asked for.
+    """
+    covered = {c.get("key") for c in cases if c.get("key")}
+    if not covered or registry is None:
+        return []
+    naked = [p["key"] for p in registry if p["key"] not in covered]
+    if naked:
+        print("  " + _paint(
+            "%d promise(s) with no planted case: %s — nobody has ever seen "
+            "these fail" % (len(naked), ", ".join(naked)), _COLOR[AVISO]), file=out)
+    else:
+        print("  " + _paint("every promise has a planted case", _DIM), file=out)
+    return naked
+
+
+def run_planted(cases: list[dict] | None = None, out=None,
+                registry: list | None = None) -> int:
+    """Run the planted failures. Returns the number that the scale did NOT see.
+
+    `registry`, if given, is the promise list: any promise with no planted case
+    naming its key is reported at the end. That report never changes the return
+    value — an uncovered promise is a gap in your suite, not a scale that failed
+    to see something, and the two deserve different words.
+    """
     cases = _PLANTED if cases is None else cases
     out = out or sys.stdout
     missed = 0
@@ -278,6 +322,7 @@ def run_planted(cases: list[dict] | None = None, out=None) -> int:
         if not ok and detail:
             print("       " + _paint(str(detail)[:120], _DIM), file=out)
     print("\n  [planted] cases=%d missed=%d" % (len(cases), missed), file=out)
+    _coverage(cases, registry, out)
     if missed:
         print("  " + _paint("The scale did not see %d failure(s) it was shown. "
                             "Fix the scale, not the case." % missed,
@@ -332,6 +377,13 @@ class Scale:
                     # fine: we learned nothing about the promise itself.
                     state, detail, remedy = (
                         UNMEASURABLE, "the probe crashed: %s" % e, "")
+                if state not in _STATES:
+                    # Same reasoning as a crash: an answer we cannot read is not
+                    # an answer. Say what came back, so the typo is findable.
+                    state, detail, remedy = (
+                        UNMEASURABLE,
+                        "the probe returned %r, which is not one of the five "
+                        "states — so the promise was not measured" % (state,), "")
             r = {"key": p["key"], "title": p["title"], "how": p["how"],
                  "mode": p["mode"], "state": state, "detail": detail,
                  "remedy": remedy, "ms": int((time.time() - t0) * 1000)}
@@ -349,7 +401,12 @@ class Scale:
         measured = [r for r in readings if r["state"] != UNMEASURED]
         broken = [r["key"] for r in measured if r["state"] == NO_CUMPLE]
         warned = [r["key"] for r in measured if r["state"] == AVISO]
-        blind = [r["key"] for r in measured if r["state"] == UNMEASURABLE]
+        # An unreadable state lands here too, and for the same reason: `weigh`
+        # already folds it in, but `verdict` is a staticmethod anyone can call
+        # with readings the scale did not produce, and the rule has to hold
+        # there as well or it holds only where it is convenient.
+        blind = [r["key"] for r in measured
+                 if r["state"] == UNMEASURABLE or r["state"] not in _STATES]
         skipped = [r["key"] for r in readings if r["state"] == UNMEASURED]
         kept = len([r for r in measured if r["state"] == CUMPLE])
         # THE ORDER IS THE POINT: unmeasurable outranks warnings. Not knowing is
@@ -367,9 +424,12 @@ class Scale:
             head += "  " + _paint(self.version, _DIM)
         print("\n  %s  %s\n" % (head, _paint("(%s)" % ", ".join(modes), _DIM)), file=out)
         for r in readings:
+            # .get, not [ ]: a reading handed in from outside can carry a state
+            # the palette does not know, and the report going down with a
+            # KeyError is the loudest possible way to tell you nothing.
             print("  %-5s %s %s %s" % (r["key"], _dot(r["state"]),
-                                       _paint("%-13s" % r["state"].upper(),
-                                              _COLOR[r["state"]]),
+                                       _paint("%-13s" % str(r["state"]).upper(),
+                                              _COLOR.get(r["state"], "")),
                                        r["title"]), file=out)
             if r["detail"]:
                 print("        %s" % _paint(r["detail"], _DIM), file=out)
@@ -447,7 +507,8 @@ class Scale:
         a = ap.parse_args(argv)
 
         if a.test:
-            return 1 if run_planted(self.planted_cases) else 0
+            return 1 if run_planted(self.planted_cases,
+                                    registry=self.registry) else 0
         if a.promises:
             print(self.table())
             return 0
