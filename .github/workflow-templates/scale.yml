@@ -1,0 +1,64 @@
+# Promise Scale — does your system keep the promises you think it does?
+#
+# This workflow runs promise-scale against your system's promises.
+# Copy your scale file (scale.py, promises.py, or health.py) into this repo
+# and the workflow runs it on every push and on a daily schedule.
+#
+# See https://github.com/heroldoe-create/promise-scale for the full README.
+name: promise scale
+
+on:
+  push:
+    paths:
+      - '**.py'
+      - '.github/workflows/scale.yml'
+  schedule:
+    # Run daily at 06:17 UTC — the scale watches whether the scale ran.
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  scale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      # Install promise-scale: single file, no dependencies.
+      - name: get promise-scale
+        run: |
+          curl -sL https://raw.githubusercontent.com/heroldoe-create/promise-scale/master/promise_scale.py -o promise_scale.py
+
+      # Find and run your scale file. It can be named scale.py, promises.py,
+      # or health.py — whatever you called it.
+      - name: run the scale
+        run: |
+          SCALE_FILE=""
+          for f in scale.py promises.py health.py; do
+            [ -f "$f" ] && SCALE_FILE="$f" && break
+          done
+          if [ -z "$SCALE_FILE" ]; then
+            echo "::error::No scale file found. Create scale.py, promises.py, or health.py."
+            exit 1
+          fi
+          echo "Running $SCALE_FILE"
+          python3 "$SCALE_FILE" --all --json > scale-result.json || true
+          python3 "$SCALE_FILE" --all
+
+      # Run planted failures if the scale file has them.
+      - name: planted failures
+        run: |
+          SCALE_FILE=""
+          for f in scale.py promises.py health.py; do
+            [ -f "$f" ] && SCALE_FILE="$f" && break
+          done
+          python3 "$SCALE_FILE" --test || true
+
+      - name: upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scale-results
+          path: scale-result.json

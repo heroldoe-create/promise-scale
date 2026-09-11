@@ -1,0 +1,11 @@
+{
+    "name": "Promise Scale — health checks that answer 'could I even tell?'",
+    "description": "Run promise-scale against your system. Every health check answers 'is it OK?' — this one also answers 'could I even tell?'. Unmeasurable never counts as green.",
+    "iconName": "scale",
+    "categories": ["Monitoring", "Python", "Testing", "DevOps"],
+    "filePatterns": [
+        "scale\\.py$",
+        "promises\\.py$",
+        "health\\.py$"
+    ]
+}

@@ -41,6 +41,25 @@ Scale(name="home server").run()
 
 Single file. No dependencies. Python 3.9+. MIT.
 
+### Try it in 30 seconds
+
+```bash
+git clone https://github.com/heroldoe-create/promise-scale && cd promise-scale
+python3 minimal.py          # two promises, both kept
+python3 example.py          # six promises, the full shape
+python3 example.py --test   # 19 planted failures, all caught
+```
+
+`minimal.py` is 15 lines. Copy it, replace the fake numbers with real ones,
+and you have a scale.
+
+### Add it to your CI
+
+This repo ships a **GitHub Actions template**: go to the *Actions* tab of your
+repo, click *New workflow*, search for *promise scale*, and it writes the
+workflow for you — including a daily schedule, because
+[a scale that never ran looks exactly like a quiet night](#the-scale-watches-whether-the-scale-ran).
+
 ---
 
 ## The one rule that makes this different
