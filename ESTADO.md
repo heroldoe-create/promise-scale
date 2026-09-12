@@ -17,6 +17,18 @@ $ git log -1 --format=%ci
 
 Commit `45edcfc` — "LE-604: traspaso — ninguna pieza de promise-scale es cotizable por Negocin".
 
+> **Corregido el 2026-09-12 por la cadena `/grafo`.** La medición de arriba se tomó
+> antes de que el propio cierre-duro cerrara. El último movimiento ya no es ese:
+>
+> ```
+> $ git log -1 --format='%ci %h'
+> 2026-09-12 01:11:30 +0000 bf3fadc
+> ```
+>
+> Commit `bf3fadc` — "cierre-duro: COMPLETADO — 80 pruebas ok; negocio cerrado,
+> release y preview matadas; 2 commits publicados". Después de esta corrección hay un
+> movimiento más, el commit de `/grafo` que agrega `PROYECTO_MAPA.md` y `CLAUDE.md`.
+
 ### VIVO_EN_PRODUCCION
 
 No es servicio. Es una biblioteca publicada en GitHub.
@@ -26,7 +38,27 @@ $ curl -s -o /dev/null -w "%{http_code}" https://github.com/heroldoe-create/prom
 200
 ```
 
-El repo responde. Hay 2 commits locales sin push (`git status` → "Your branch is ahead of 'origin/master' by 2 commits").
+El repo responde.
+
+> **Corregido el 2026-09-12 por la cadena `/grafo`.** Esta línea decía *"Hay 2 commits
+> locales sin push (`git status` → «Your branch is ahead of 'origin/master' by 2
+> commits»)"*. Ya no es cierto: los dos commits se publicaron en la Fase 5 de este
+> mismo cierre-duro, como anuncia el veredicto del CEO al final de este archivo.
+> Medido:
+>
+> ```
+> $ git rev-parse HEAD
+> bf3fadcbfa82c5e85f4e7de7de50af349c8333b6
+> $ git ls-remote origin refs/heads/master
+> bf3fadcbfa82c5e85f4e7de7de50af349c8333b6	refs/heads/master
+> $ git status -sb
+> ## master...origin/master
+> $ curl -s -o /dev/null -w "%{http_code}" https://raw.githubusercontent.com/heroldoe-create/promise-scale/master/minimal.py
+> 200
+> ```
+>
+> Local y remoto coinciden: **no hay commits sin publicar**, y el `git clone … &&
+> python3 minimal.py` que promete el README ya funciona para cualquiera.
 
 ### ENTRADAS
 
