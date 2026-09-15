@@ -54,7 +54,16 @@ jobs:
           for f in scale.py promises.py health.py; do
             [ -f "$f" ] && SCALE_FILE="$f" && break
           done
-          python3 "$SCALE_FILE" --test || true
+          # --test plants known failures and exits non-zero when the scale does
+          # NOT catch them. That exit code is the only signal that says whether
+          # the scale works at all, so it is NOT discarded: a scale that misses
+          # its planted failures fails this job.
+          # Nothing is tolerated here on purpose. `Scale.run()` always accepts
+          # --test (promise_scale.py:796), and a scale with no planted cases
+          # already exits 0 with a warning (run_planted returns 0 for an empty
+          # list, promise_scale.py:492-495) — so there is no "it might not have
+          # --test" case left to excuse.
+          python3 "$SCALE_FILE" --test
 
       - name: upload results
         if: always()
