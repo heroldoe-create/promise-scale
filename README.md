@@ -78,7 +78,11 @@ A probe that cannot answer looks exactly like a probe that answered "fine". This
 
 ## Install
 
-Copy `promise_scale.py` next to your code. That is the whole install.
+Copy `promise_scale.py` next to your code. That is the whole install:
+
+```bash
+curl -fsSO https://raw.githubusercontent.com/heroldoe-create/promise-scale/master/promise_scale.py
+```
 
 ```bash
 python3 example.py           # a full worked example

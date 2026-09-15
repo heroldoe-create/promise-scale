@@ -219,3 +219,42 @@ una revisión de código.** El primero convierte un dato raro en un traceback qu
 mata el parte completo. En un programa cuyo trabajo es seguir contestando cuando
 algo sale mal, cada acceso directo a un diccionario indexado por dato ajeno es
 una forma de callarse. Quedan pocos; míralos antes de añadir el siguiente.
+
+## 2026-09-15 — Medición del KPI y una línea de instalación (LE-604, mesa Claude)
+
+**La pregunta del turno:** ¿en qué está la adopción medible —el único KPI de este
+asiento, con corte 2026-10-02— y por qué está donde está?
+
+**Lo medido** (API de GitHub, 2026-09-15, comandos en la entrega
+`lolo-enterprises/operacion/entregas/le-604-260915-*.md`): 1 estrella y es la
+cuenta del propio Heroldo (`stargazers` → `["heroldoe-create"]`) · 0 forks ·
+0 issues · vistas: 1 en los últimos 9 días · referrers de toda la vida: solo
+`github.com`, 10 vistas, 1 único visitante · 135 clones / 55 únicos que
+correlacionan con actividad interna (lanzamiento 09-02, revisión 09-07,
+cierre-duro 09-12) y coexisten con 0 señales externas: [Probable] son las
+máquinas del propio holding. El enlace del sitio (`lolo-enterprises.com`,
+tarjeta «Código abierto 03») existe y no produce tráfico porque la portada
+tampoco recibe — y lleva `rel="noreferrer"`, así que jamás aparecería como
+referrer aunque alguien clicara.
+
+**Qué se cambió:** solo el README — el camino de 30 segundos exigía clonar el
+repo entero; ahora el Install muestra el `curl -fsSO` de una línea, que es la
+promesa «copiar un archivo es toda la instalación» hecha literal. Cero código,
+cero CHANGELOG (no cambió nada que la librería haga). Arneses: 19/19 plantados,
+scale-self-test 0 perdidos, doble `--all --brief` 3→0 verificado en /tmp.
+
+**La trampa para quien siga:** la checklist del §9 («la primera `--brief` debe
+salir 3») **se ve rota dentro de una jaula** — `History.append` traga
+excepciones (`except: pass`), la jaula rechaza la escritura en
+`~/.local/share/example-scale/`, y las dos corridas salen 3 para siempre sin un
+solo error a la vista. Medido: mismo flujo con historial en `/tmp` da 3 y luego
+0. Si tu entorno no puede escribir donde `aqui` apunta, la báscula nunca se ve a
+sí misma correr — y parece que el proyecto mintió cuando no mintió.
+
+**Lo que NO se tocó, con razón escrita:** la release `v0.2.0` y la social
+preview quedaron MATADAS como promesa por el cierre-duro 2026-09-12 (ESTADO.md,
+«La release v0.2.0 y la social preview quedan MATADAS»); la hoja del asiento da
+techo de push, pero matar una decisión escrita de hace 3 días no es mover un
+KPI. La distribución externa (redes, agregadores, PyPI) queda fuera del techo
+N2_PUBLICA o detrás del gate — no se intentó por ningún otro camino.
+
